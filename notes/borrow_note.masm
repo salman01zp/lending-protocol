@@ -1,0 +1,279 @@
+# ===================================================================================================
+# Borrow Note Script
+# ===================================================================================================
+# This note script allows users to borrow assets from the lending pool.
+# User must prove sufficient collateral and healthy position via ZK proof.
+
+use.miden::account
+use.miden::note
+use.miden::tx
+
+# Note metadata constants
+const.BORROW_NOTE_TYPE=3
+
+# Precision constants
+const.PRECISION=10000
+const.LIQUIDATION_THRESHOLD=8500  # 85%
+
+# ===================================================================================================
+# BORROW NOTE MAIN
+# This is the main entry point executed when the note is consumed
+#
+# Expected note inputs:
+# - Asset ID to borrow
+# - Amount to borrow
+# - Borrower account ID
+# - Collateral proof (hash of collateral state)
+#
+# Stack input: []
+# Stack output: []
+# ===================================================================================================
+begin
+    # Get note inputs
+    exec.note::get_inputs
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_proof, ...]
+
+    # Verify note is consumed by lending pool
+    exec.validate_consumer
+
+    # Verify borrower has sufficient collateral
+    # This checks the ZK proof of collateral value
+    exec.verify_collateral_proof
+
+    # Calculate borrower's health factor after this borrow
+    exec.calculate_health_factor
+
+    # Verify health factor >= 1.0
+    exec.verify_health_factor
+
+    # Check pool has sufficient liquidity
+    exec.verify_pool_liquidity
+
+    # Update pool state (increase total borrowed)
+    exec.update_pool_borrow_state
+
+    # Create debt token note for borrower
+    exec.create_debt_note
+
+    # Create output note with borrowed assets for borrower
+    exec.create_borrow_asset_note
+end
+
+# ===================================================================================================
+# VALIDATE CONSUMER
+# Ensures the note is consumed by the authorized lending pool
+# Stack input: [borrower_account_id, asset_id, borrow_amount, collateral_proof]
+# Stack output: [borrower_account_id, asset_id, borrow_amount, collateral_proof]
+# ===================================================================================================
+proc.validate_consumer
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_proof]
+
+    exec.account::get_id
+    # Stack: [consumer_account_id, borrower_account_id, asset_id, borrow_amount, collateral_proof]
+
+    # Verify consumer is lending pool
+    dup.0
+    push.0
+    neq
+    assert
+
+    drop
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_proof]
+end
+
+# ===================================================================================================
+# VERIFY COLLATERAL PROOF
+# Verifies the ZK proof of borrower's collateral
+# Stack input: [borrower_account_id, asset_id, borrow_amount, collateral_proof]
+# Stack output: [borrower_account_id, asset_id, borrow_amount, collateral_value]
+# ===================================================================================================
+proc.verify_collateral_proof
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_proof]
+
+    # In production, this would:
+    # 1. Verify the ZK proof that borrower has claimed collateral
+    # 2. Extract collateral value from the proof
+    # 3. Verify proof signature/validity
+
+    # For now, we'll do simplified validation
+    dup.3  # collateral_proof
+    # Stack: [collateral_proof, borrower_account_id, asset_id, borrow_amount, collateral_proof]
+
+    # Verify proof is not zero (placeholder)
+    push.0
+    neq
+    assert
+
+    # Extract collateral value from proof
+    # In practice, this would be part of the proof data
+    # For now, use placeholder value
+    drop
+    push.10000  # Placeholder collateral value
+    # Stack: [collateral_value, borrower_account_id, asset_id, borrow_amount, collateral_proof]
+
+    # Replace collateral_proof with collateral_value on stack
+    swap.4
+    drop
+    swap.3
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value]
+end
+
+# ===================================================================================================
+# CALCULATE HEALTH FACTOR
+# Calculates health factor: (collateral * liquidation_threshold) / (current_debt + new_borrow)
+# Stack input: [borrower_account_id, asset_id, borrow_amount, collateral_value]
+# Stack output: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# ===================================================================================================
+proc.calculate_health_factor
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value]
+
+    # Get borrower's current debt
+    # In practice, this would query from borrower's account or pool records
+    push.0  # Placeholder current_debt
+    # Stack: [current_debt, borrower_account_id, asset_id, borrow_amount, collateral_value]
+
+    # Calculate total debt = current_debt + new_borrow_amount
+    dup.3  # borrow_amount
+    add
+    # Stack: [total_debt, borrower_account_id, asset_id, borrow_amount, collateral_value]
+
+    # Calculate adjusted collateral = collateral_value * liquidation_threshold / PRECISION
+    dup.4  # collateral_value
+    push.LIQUIDATION_THRESHOLD
+    mul
+    push.PRECISION
+    div
+    # Stack: [adjusted_collateral, total_debt, borrower_account_id, asset_id, borrow_amount, collateral_value]
+
+    # Calculate health_factor = adjusted_collateral / total_debt
+    # Handle division by zero (no debt = infinite health factor)
+    dup.1
+    push.0
+    eq
+    if.true
+        # No debt, return max health factor
+        drop
+        drop
+        push.1000000  # Very large number representing infinity
+    else
+        # health_factor = (adjusted_collateral * PRECISION) / total_debt
+        push.PRECISION
+        mul
+        swap.1
+        div
+    end
+    # Stack: [health_factor, borrower_account_id, asset_id, borrow_amount, collateral_value]
+
+    # Reorder stack
+    swap.4
+    swap.1
+    swap.2
+    swap.3
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+end
+
+# ===================================================================================================
+# VERIFY HEALTH FACTOR
+# Ensures health factor >= 1.0 (PRECISION)
+# Stack input: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# Stack output: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# ===================================================================================================
+proc.verify_health_factor
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+
+    # Verify health_factor >= PRECISION (1.0)
+    dup.4  # health_factor
+    push.PRECISION
+    gte
+    assert
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+end
+
+# ===================================================================================================
+# VERIFY POOL LIQUIDITY
+# Checks that pool has enough liquidity for the borrow
+# Stack input: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# Stack output: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# ===================================================================================================
+proc.verify_pool_liquidity
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+
+    # Get available liquidity from pool
+    # available = total_liquidity - total_borrowed
+
+    # For this asset_id, check TOTAL_LIQUIDITY - TOTAL_BORROWED >= borrow_amount
+    # TODO: Implement actual storage lookup
+
+    # Placeholder verification
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+end
+
+# ===================================================================================================
+# UPDATE POOL BORROW STATE
+# Updates pool's total borrowed amount and interest rates
+# Stack input: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# Stack output: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# ===================================================================================================
+proc.update_pool_borrow_state
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+
+    # Call lending pool's borrow tracking function
+    # This would update TOTAL_BORROWED and recalculate interest rates
+
+    # Prepare stack for pool function call
+    # Expected: [borrow_amount, asset_id]
+    dup.2  # borrow_amount
+    dup.2  # asset_id
+    # Stack: [asset_id, borrow_amount, borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+
+    # Call pool update (placeholder)
+    # In practice: exec.lending_pool::record_borrow
+
+    drop
+    drop
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+end
+
+# ===================================================================================================
+# CREATE DEBT NOTE
+# Creates a note representing the debt token for the borrower
+# Stack input: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# Stack output: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# ===================================================================================================
+proc.create_debt_note
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+
+    # Create output note with debt token
+    # This debt token will accrue interest over time
+    # Recipient: borrower_account_id
+    # Amount: borrow_amount (in debt tokens)
+
+    # In practice: exec.tx::create_note with debt token metadata
+
+    # No stack changes
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+end
+
+# ===================================================================================================
+# CREATE BORROW ASSET NOTE
+# Creates output note with borrowed assets for the borrower
+# Stack input: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+# Stack output: []
+# ===================================================================================================
+proc.create_borrow_asset_note
+    # Stack: [borrower_account_id, asset_id, borrow_amount, collateral_value, health_factor]
+
+    # Create output note with actual assets
+    # Recipient: borrower_account_id
+    # Asset: borrow_amount of asset_id
+
+    # In practice: exec.tx::create_note
+
+    # Clean up stack
+    drop
+    drop
+    drop
+    drop
+    drop
+    # Stack: []
+end

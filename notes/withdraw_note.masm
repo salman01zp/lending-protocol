@@ -1,0 +1,198 @@
+# ===================================================================================================
+# Withdraw Note Script
+# ===================================================================================================
+# This note script allows users to withdraw assets from the lending pool.
+# Users must send their aTokens (via note) to the pool, which burns them and returns underlying assets.
+
+use.miden::account
+use.miden::note
+use.miden::tx
+
+# Note metadata constants
+const.WITHDRAW_NOTE_TYPE=2
+
+# ===================================================================================================
+# WITHDRAW NOTE MAIN
+# This is the main entry point executed when the note is consumed by the lending pool
+#
+# Expected note inputs:
+# - aToken amount to burn
+# - Asset ID to withdraw
+# - Withdrawer account ID
+#
+# Stack input: []
+# Stack output: []
+# ===================================================================================================
+begin
+    # Get note inputs
+    exec.note::get_inputs
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount, ...]
+
+    # Verify note is consumed by lending pool
+    exec.validate_consumer
+
+    # Calculate underlying asset amount from aToken amount
+    # This uses the current liquidity index to determine exchange rate
+    exec.calculate_withdraw_amount
+
+    # Verify sufficient liquidity exists in pool
+    exec.verify_liquidity
+
+    # Burn aTokens (represented by this note)
+    exec.burn_atokens
+
+    # Update pool state (reduce total liquidity)
+    exec.update_pool_state
+
+    # Create output note with underlying assets for withdrawer
+    exec.create_withdrawal_note
+end
+
+# ===================================================================================================
+# VALIDATE CONSUMER
+# Ensures the note is consumed by the authorized lending pool
+# Stack input: [withdrawer_account_id, asset_id, atoken_amount]
+# Stack output: [withdrawer_account_id, asset_id, atoken_amount]
+# ===================================================================================================
+proc.validate_consumer
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount]
+
+    # Get consuming account ID
+    exec.account::get_id
+    # Stack: [consumer_account_id, withdrawer_account_id, asset_id, atoken_amount]
+
+    # Verify it's the lending pool
+    dup.0
+    push.0
+    neq
+    assert
+
+    drop
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount]
+end
+
+# ===================================================================================================
+# CALCULATE WITHDRAW AMOUNT
+# Calculates underlying asset amount based on aToken amount and current index
+# Formula: underlying_amount = atoken_amount * current_index / initial_index
+# Stack input: [withdrawer_account_id, asset_id, atoken_amount]
+# Stack output: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+# ===================================================================================================
+proc.calculate_withdraw_amount
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount]
+
+    # Get current liquidity index from pool storage
+    # The index tracks accumulated interest over time
+
+    # For simplicity, we'll assume 1:1 ratio for now
+    # In production, this would fetch the actual index:
+    # - Get asset_id
+    # - Lookup corresponding liquidity_index storage slot
+    # - Calculate: atoken_amount * current_index / 1e27
+
+    dup.2  # atoken_amount
+    # Stack: [atoken_amount, withdrawer_account_id, asset_id, atoken_amount]
+
+    # For now, underlying_amount = atoken_amount (simplified)
+    # Stack: [underlying_amount, withdrawer_account_id, asset_id, atoken_amount]
+
+    # Reorder stack
+    swap.3
+    swap.1
+    swap.2
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+end
+
+# ===================================================================================================
+# VERIFY LIQUIDITY
+# Checks that pool has enough liquidity for the withdrawal
+# Stack input: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+# Stack output: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+# ===================================================================================================
+proc.verify_liquidity
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+
+    # Get total liquidity and total borrowed from pool storage
+    # available_liquidity = total_liquidity - total_borrowed
+
+    # Get asset_id to determine which storage slots to check
+    dup.1
+    # Stack: [asset_id, withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+
+    # TODO: Fetch TOTAL_LIQUIDITY and TOTAL_BORROWED for this asset
+    # For now, we'll do a simple placeholder check
+
+    # Verify underlying_amount <= available_liquidity
+    # dup.4 is underlying_amount
+    # Compare with available liquidity (placeholder)
+
+    drop
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+end
+
+# ===================================================================================================
+# BURN ATOKENS
+# Burns the aTokens represented by this note
+# Stack input: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+# Stack output: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+# ===================================================================================================
+proc.burn_atokens
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+
+    # In Miden, burning tokens means not forwarding them in output
+    # The aTokens in this note are effectively destroyed
+    # when the note is consumed without creating equivalent output
+
+    # No stack changes needed
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+end
+
+# ===================================================================================================
+# UPDATE POOL STATE
+# Calls lending pool's withdraw function to update reserve state
+# Stack input: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+# Stack output: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+# ===================================================================================================
+proc.update_pool_state
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+
+    # Prepare to call lending_pool::withdraw
+    # Expected input: [amount, asset_id]
+
+    dup.3  # underlying_amount
+    dup.2  # asset_id
+    # Stack: [asset_id, underlying_amount, withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+
+    # Call pool's withdraw function
+    # This updates total liquidity and interest rates
+
+    # Clean up
+    drop
+    drop
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+end
+
+# ===================================================================================================
+# CREATE WITHDRAWAL NOTE
+# Creates output note with underlying assets for the withdrawer
+# Stack input: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+# Stack output: []
+# ===================================================================================================
+proc.create_withdrawal_note
+    # Stack: [withdrawer_account_id, asset_id, atoken_amount, underlying_amount]
+
+    # Create a note containing the underlying assets
+    # Recipient: withdrawer_account_id
+    # Asset: underlying_amount of asset_id
+    # Note type: withdrawal confirmation
+
+    # In practice, this would use tx::create_note
+    # to create an output note with the assets
+
+    # Clean up stack
+    drop
+    drop
+    drop
+    drop
+    # Stack: []
+end

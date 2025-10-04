@@ -1,0 +1,333 @@
+# ===================================================================================================
+# Liquidation Note Script
+# ===================================================================================================
+# This note script allows liquidators to liquidate undercollateralized positions.
+# Liquidator repays part of borrower's debt and receives collateral with a bonus.
+
+use.miden::account
+use.miden::note
+use.miden::tx
+
+# Note metadata constants
+const.LIQUIDATION_NOTE_TYPE=5
+
+# Liquidation parameters
+const.PRECISION=10000
+const.LIQUIDATION_CLOSE_FACTOR=5000  # 50% - max debt that can be liquidated at once
+const.LIQUIDATION_BONUS=10500        # 105% - liquidator gets 5% bonus
+const.MIN_HEALTH_FACTOR=10000        # 1.0 - positions below this can be liquidated
+
+# ===================================================================================================
+# LIQUIDATION NOTE MAIN
+# This is the main entry point executed when the note is consumed
+#
+# Expected note inputs:
+# - Borrower account ID (position being liquidated)
+# - Collateral asset ID (asset to seize)
+# - Debt asset ID (asset being repaid)
+# - Debt amount to cover
+# - Liquidator account ID
+#
+# Stack input: []
+# Stack output: []
+# ===================================================================================================
+begin
+    # Get note inputs
+    exec.note::get_inputs
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, ...]
+
+    # Verify note is consumed by lending pool
+    exec.validate_consumer
+
+    # Verify borrower's position is undercollateralized
+    exec.verify_liquidation_eligible
+
+    # Verify debt_to_cover doesn't exceed max liquidation amount
+    exec.verify_liquidation_amount
+
+    # Calculate collateral to seize (with bonus)
+    exec.calculate_collateral_seizure
+
+    # Add debt repayment to pool
+    exec.add_debt_repayment
+
+    # Update pool state (reduce borrowed amount)
+    exec.update_pool_liquidation_state
+
+    # Update borrower's position (reduce collateral and debt)
+    exec.update_borrower_position
+
+    # Create note with seized collateral for liquidator
+    exec.create_collateral_note
+
+    # Create liquidation event note for borrower
+    exec.create_liquidation_event_note
+end
+
+# ===================================================================================================
+# VALIDATE CONSUMER
+# Ensures the note is consumed by the authorized lending pool
+# Stack input: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+# Stack output: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+# ===================================================================================================
+proc.validate_consumer
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+
+    exec.account::get_id
+    # Stack: [consumer_account_id, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+
+    # Verify consumer is lending pool
+    dup.0
+    push.0
+    neq
+    assert
+
+    drop
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+end
+
+# ===================================================================================================
+# VERIFY LIQUIDATION ELIGIBLE
+# Checks that borrower's health factor < 1.0, making them eligible for liquidation
+# Stack input: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+# Stack output: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+# ===================================================================================================
+proc.verify_liquidation_eligible
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+
+    # Get borrower's position data
+    # In practice, this would query:
+    # 1. Total collateral value (in USD)
+    # 2. Total debt value (in USD)
+    # 3. Calculate health factor
+
+    # For now, use placeholder values
+    push.8000   # total_collateral_usd (placeholder)
+    push.10000  # total_debt_usd (placeholder)
+    # Stack: [total_debt, total_collateral, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+
+    # Calculate health factor = (collateral * 0.85) / debt
+    # First multiply collateral by liquidation threshold (85%)
+    swap.1
+    push.8500  # Liquidation threshold 85%
+    mul
+    push.PRECISION
+    div
+    # Stack: [adjusted_collateral, total_debt, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+
+    # Calculate health factor = (adjusted_collateral * PRECISION) / total_debt
+    push.PRECISION
+    mul
+    swap.1
+    div
+    # Stack: [health_factor, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+
+    # Verify health_factor < MIN_HEALTH_FACTOR (1.0)
+    dup.0
+    push.MIN_HEALTH_FACTOR
+    lt
+    assert
+    # Stack: [health_factor, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover]
+
+    # Reorder stack
+    swap.5
+    swap.1
+    swap.2
+    swap.3
+    swap.4
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+end
+
+# ===================================================================================================
+# VERIFY LIQUIDATION AMOUNT
+# Verifies that debt_to_cover doesn't exceed the maximum allowed (close factor)
+# Stack input: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+# Stack output: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+# ===================================================================================================
+proc.verify_liquidation_amount
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+
+    # Get borrower's total debt for debt_asset_id
+    # max_liquidatable = total_debt * LIQUIDATION_CLOSE_FACTOR / PRECISION
+
+    # Placeholder: total debt for this asset
+    push.10000  # total_debt_in_asset
+    # Stack: [total_debt, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+
+    # Calculate max liquidatable = total_debt * 50%
+    push.LIQUIDATION_CLOSE_FACTOR
+    mul
+    push.PRECISION
+    div
+    # Stack: [max_liquidatable, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+
+    # Verify debt_to_cover <= max_liquidatable
+    dup.5  # debt_to_cover
+    dup.1  # max_liquidatable
+    lte
+    assert
+
+    drop
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+end
+
+# ===================================================================================================
+# CALCULATE COLLATERAL SEIZURE
+# Calculates amount of collateral to give liquidator (with bonus)
+# Formula: collateral_to_seize = (debt_to_cover * debt_price * liquidation_bonus) / collateral_price
+# Stack input: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+# Stack output: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_amount]
+# ===================================================================================================
+proc.calculate_collateral_seizure
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+
+    # Get asset prices from oracle
+    # In practice: query PriceOracle account
+
+    # Placeholder prices (8 decimals)
+    push.100000000   # debt_asset_price ($1.00 for stablecoin)
+    push.250000000000 # collateral_asset_price ($2500 for ETH)
+    # Stack: [collateral_price, debt_price, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+
+    # Calculate: (debt_to_cover * debt_price) = debt_value_usd
+    dup.6  # debt_to_cover
+    dup.2  # debt_price
+    mul
+    # Stack: [debt_value, collateral_price, debt_price, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+
+    # Apply liquidation bonus: debt_value * 1.05
+    push.LIQUIDATION_BONUS
+    mul
+    push.PRECISION
+    div
+    # Stack: [debt_value_with_bonus, collateral_price, debt_price, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+
+    # Divide by collateral price to get collateral amount
+    swap.1
+    div
+    # Stack: [collateral_to_seize, debt_price, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+
+    # Clean up debt_price
+    swap.1
+    drop
+    # Stack: [collateral_to_seize, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor]
+
+    # Reorder stack
+    swap.6
+    swap.1
+    swap.2
+    swap.3
+    swap.4
+    swap.5
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+end
+
+# ===================================================================================================
+# ADD DEBT REPAYMENT
+# Adds the liquidator's debt repayment to the pool
+# Stack input: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+# Stack output: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+# ===================================================================================================
+proc.add_debt_repayment
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+
+    # The liquidator's repayment assets are in this note
+    # They are automatically added to pool vault on consumption
+
+    # No stack changes
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+end
+
+# ===================================================================================================
+# UPDATE POOL LIQUIDATION STATE
+# Updates pool state to reflect the liquidation
+# Stack input: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+# Stack output: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+# ===================================================================================================
+proc.update_pool_liquidation_state
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+
+    # Update pool's TOTAL_BORROWED (decrease by debt_to_cover)
+    # This is similar to a repayment
+
+    # Prepare for pool call
+    dup.4  # debt_to_cover
+    dup.4  # debt_asset_id
+    # Stack: [debt_asset_id, debt_to_cover, liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+
+    # Call pool update function
+    # exec.lending_pool::record_liquidation
+
+    drop
+    drop
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+end
+
+# ===================================================================================================
+# UPDATE BORROWER POSITION
+# Updates borrower's collateral and debt tracking
+# Stack input: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+# Stack output: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+# ===================================================================================================
+proc.update_borrower_position
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+
+    # In a complete implementation:
+    # 1. Reduce borrower's collateral by collateral_to_seize
+    # 2. Reduce borrower's debt by debt_to_cover
+    # 3. Recalculate borrower's health factor
+
+    # This would be communicated via note to borrower's account
+
+    # No stack changes
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+end
+
+# ===================================================================================================
+# CREATE COLLATERAL NOTE
+# Creates output note with seized collateral for liquidator
+# Stack input: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+# Stack output: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+# ===================================================================================================
+proc.create_collateral_note
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+
+    # Create note for liquidator with seized collateral
+    # Recipient: liquidator_id
+    # Asset: collateral_to_seize of collateral_asset_id
+    # Includes 5% liquidation bonus
+
+    # In practice: exec.tx::create_note
+
+    # No stack changes
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+end
+
+# ===================================================================================================
+# CREATE LIQUIDATION EVENT NOTE
+# Creates notification note for borrower about the liquidation
+# Stack input: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+# Stack output: []
+# ===================================================================================================
+proc.create_liquidation_event_note
+    # Stack: [liquidator_id, borrower_id, collateral_asset_id, debt_asset_id, debt_to_cover, health_factor, collateral_to_seize]
+
+    # Create informational note for borrower
+    # Contains:
+    # - Amount of debt repaid
+    # - Amount of collateral seized
+    # - Remaining position details
+    # - New health factor
+
+    # In practice: exec.tx::create_note with liquidation event metadata
+
+    # Clean up stack
+    drop
+    drop
+    drop
+    drop
+    drop
+    drop
+    drop
+    # Stack: []
+end

@@ -1,0 +1,168 @@
+# ===================================================================================================
+# Deposit Note Script
+# ===================================================================================================
+# This note script allows users to deposit assets into the lending pool.
+# When consumed by the lending pool, it transfers assets and triggers aToken minting.
+
+use.miden::account
+use.miden::note
+use.miden::tx
+
+# Note metadata constants
+const.DEPOSIT_NOTE_TYPE=1
+
+# ===================================================================================================
+# DEPOSIT NOTE MAIN
+# This is the main entry point executed when the note is consumed
+#
+# Expected note inputs:
+# - Asset to deposit
+# - Amount to deposit
+# - Depositor account ID
+#
+# Stack input: []
+# Stack output: []
+# ===================================================================================================
+begin
+    # Get note inputs
+    # In Miden, note inputs are available through the note interface
+
+    # Push the asset details to stack
+    # Format: [amount, asset_id, depositor_account_id]
+    exec.note::get_inputs
+    # Stack: [depositor_account_id, asset_id, amount, ...]
+
+    # Store values for later use
+    # Stack manipulation to prepare for account calls
+
+    # Verify that the note is being consumed by the lending pool account
+    # This ensures only the pool can process deposits
+    exec.validate_consumer
+
+    # Add asset to the pool's vault
+    # The asset is transferred from the note to the consuming account (pool)
+    exec.add_asset_to_pool
+
+    # Update pool's deposit accounting
+    # This calls the lending_pool::deposit function
+    exec.update_pool_state
+
+    # Create output note with aTokens for the depositor
+    # aTokens represent the depositor's claim on their deposit + interest
+    exec.create_atoken_note
+end
+
+# ===================================================================================================
+# VALIDATE CONSUMER
+# Ensures the note is consumed by an authorized lending pool account
+# Stack input: [depositor_account_id, asset_id, amount]
+# Stack output: [depositor_account_id, asset_id, amount]
+# ===================================================================================================
+proc.validate_consumer
+    # Stack: [depositor_account_id, asset_id, amount]
+
+    # Get the ID of the account consuming this note
+    exec.account::get_id
+    # Stack: [consumer_account_id, depositor_account_id, asset_id, amount]
+
+    # TODO: Verify consumer_account_id matches expected lending pool ID
+    # For now, we'll just check it's not zero
+    dup.0
+    push.0
+    neq
+    assert
+    # Stack: [consumer_account_id, depositor_account_id, asset_id, amount]
+
+    # Clean up - drop consumer ID
+    drop
+    # Stack: [depositor_account_id, asset_id, amount]
+end
+
+# ===================================================================================================
+# ADD ASSET TO POOL
+# Transfers the asset from the note to the pool account's vault
+# Stack input: [depositor_account_id, asset_id, amount]
+# Stack output: [depositor_account_id, asset_id, amount]
+# ===================================================================================================
+proc.add_asset_to_pool
+    # Stack: [depositor_account_id, asset_id, amount]
+
+    # The asset is automatically available in the note
+    # We need to add it to the account's vault
+
+    # Get asset from note
+    dup.2  # amount
+    dup.2  # asset_id
+    # Stack: [asset_id, amount, depositor_account_id, asset_id, amount]
+
+    # Add asset to account vault
+    # Note: In Miden, assets in consumed notes are automatically available
+    # The account's code handles the actual vault update
+
+    # Clean up duplicates
+    drop
+    drop
+    # Stack: [depositor_account_id, asset_id, amount]
+end
+
+# ===================================================================================================
+# UPDATE POOL STATE
+# Calls the lending pool's deposit function to update reserve state
+# Stack input: [depositor_account_id, asset_id, amount]
+# Stack output: [depositor_account_id, asset_id, amount]
+# ===================================================================================================
+proc.update_pool_state
+    # Stack: [depositor_account_id, asset_id, amount]
+
+    # Prepare stack for calling lending_pool::deposit
+    # The deposit function expects: [amount, asset_id]
+    dup.2  # amount
+    dup.2  # asset_id
+    # Stack: [asset_id, amount, depositor_account_id, asset_id, amount]
+
+    # Call the pool's deposit function
+    # This updates total liquidity and interest rates
+    # Note: The actual call syntax depends on how procedures are imported
+    # For now, this is a placeholder for the call
+
+    # In practice, the lending pool account's deposit procedure
+    # would be called during note consumption
+
+    # Clean up
+    drop
+    drop
+    # Stack: [depositor_account_id, asset_id, amount]
+end
+
+# ===================================================================================================
+# CREATE ATOKEN NOTE
+# Creates an output note with aTokens to send back to the depositor
+# aTokens represent the depositor's share of the pool + accrued interest
+# Stack input: [depositor_account_id, asset_id, amount]
+# Stack output: []
+# ===================================================================================================
+proc.create_atoken_note
+    # Stack: [depositor_account_id, asset_id, amount]
+
+    # In a full implementation, we would:
+    # 1. Calculate the aToken amount based on current exchange rate
+    # 2. Create a new note with aTokens
+    # 3. Set the recipient to depositor_account_id
+    # 4. Add metadata about the deposit
+
+    # For now, we'll create a simple note structure
+    # In Miden, output notes are created using tx::create_note
+
+    # Prepare note data
+    # Stack: [depositor_account_id, asset_id, amount]
+
+    # Create note for depositor with aToken metadata
+    # The actual implementation would use:
+    # exec.tx::create_note
+
+    # Clean up stack
+    drop
+    drop
+    drop
+    # Stack: []
+end
