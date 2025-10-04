@@ -13,6 +13,7 @@ mod config;
 mod accounts;
 mod transactions;
 mod utils;
+mod miden_client;
 
 /// Miden Lending Protocol CLI
 #[derive(Parser)]

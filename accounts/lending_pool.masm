@@ -8,6 +8,9 @@ use.miden::account
 use.miden::note
 use.std::sys
 
+# Import interest rate module
+use.interest_rate
+
 # Storage slot constants for USDC reserve
 const.TOTAL_LIQUIDITY_USDC=0
 const.TOTAL_BORROWED_USDC=1
@@ -218,11 +221,80 @@ proc.update_rates
     end
     # Stack: [total_liquidity, total_borrowed, asset_id]
 
-    # Calculate and update rates (simplified - will use external module)
-    # For now, just clean up stack
+    # Calculate interest rates using external module
+    push.RESERVE_FACTOR
+    # Stack: [reserve_factor, total_liquidity, total_borrowed, asset_id]
+
+    swap.2
+    swap.1
+    # Stack: [total_borrowed, total_liquidity, reserve_factor, asset_id]
+
+    # Call interest rate calculation module
+    exec.interest_rate::calculate_interest_rates
+    # Stack: [supply_rate, borrow_rate, asset_id]
+
+    # Store the calculated rates
+    exec.store_rates
+    # Stack: [asset_id]
+
+    drop
+end
+
+# ===================================================================================================
+# STORE RATES
+# Stores calculated interest rates in storage
+# Stack input: [supply_rate, borrow_rate, asset_id]
+# Stack output: [asset_id]
+# ===================================================================================================
+proc.store_rates
+    # Stack: [supply_rate, borrow_rate, asset_id]
+
+    # Get storage slots for this asset
+    dup.2
+    push.ASSET_USDC eq
+    if.true
+        # Store borrow rate
+        push.CURRENT_BORROW_RATE_USDC
+        dup.2
+        swap.1
+        exec.account::set_item
+
+        # Store supply rate
+        push.CURRENT_LIQUIDITY_RATE_USDC
+        dup.1
+        swap.1
+        exec.account::set_item
+    else
+        dup.2
+        push.ASSET_DAI eq
+        if.true
+            push.CURRENT_BORROW_RATE_DAI
+            dup.2
+            swap.1
+            exec.account::set_item
+
+            push.CURRENT_LIQUIDITY_RATE_DAI
+            dup.1
+            swap.1
+            exec.account::set_item
+        else
+            push.CURRENT_BORROW_RATE_WETH
+            dup.2
+            swap.1
+            exec.account::set_item
+
+            push.CURRENT_LIQUIDITY_RATE_WETH
+            dup.1
+            swap.1
+            exec.account::set_item
+        end
+    end
+    # Stack: [supply_rate, borrow_rate, asset_id]
+
+    # Clean up rates
     drop
     drop
-    drop
+    # Stack: [asset_id]
 end
 
 # ===================================================================================================
@@ -279,4 +351,258 @@ export.get_reserve_data
     swap.1
     swap.2
     # Stack: [total_liquidity, total_borrowed, liquidity_rate, borrow_rate]
+end
+# ===================================================================================================
+# LendingPool Extended Functions - Borrow, Repay, and Liquidation
+# ===================================================================================================
+# Additional functions to append to lending_pool.masm
+
+# ===================================================================================================
+# BORROW FUNCTION
+# Records a borrow and updates pool state
+# Stack input: [amount, asset_id]
+# Stack output: [success_flag]
+# ===================================================================================================
+export.borrow
+    # Stack: [amount, asset_id]
+
+    # Get the appropriate storage slots for this asset
+    dup.1
+    push.ASSET_USDC eq
+    if.true
+        push.TOTAL_BORROWED_USDC
+        push.TOTAL_LIQUIDITY_USDC
+    else
+        dup.1
+        push.ASSET_DAI eq
+        if.true
+            push.TOTAL_BORROWED_DAI
+            push.TOTAL_LIQUIDITY_DAI
+        else
+            push.TOTAL_BORROWED_WETH
+            push.TOTAL_LIQUIDITY_WETH
+        end
+    end
+    # Stack: [liquidity_slot, borrowed_slot, amount, asset_id]
+
+    # Verify sufficient liquidity available
+    # available = total_liquidity - total_borrowed
+    dup.0
+    exec.account::get_item
+    # Stack: [total_liquidity, liquidity_slot, borrowed_slot, amount, asset_id]
+
+    swap.2
+    dup.0
+    exec.account::get_item
+    # Stack: [total_borrowed, borrowed_slot, total_liquidity, liquidity_slot, amount, asset_id]
+
+    # Calculate available liquidity
+    swap.2
+    # Stack: [total_liquidity, borrowed_slot, total_borrowed, liquidity_slot, amount, asset_id]
+
+    dup.2
+    sub
+    # Stack: [available_liquidity, borrowed_slot, total_borrowed, liquidity_slot, amount, asset_id]
+
+    # Verify borrow_amount <= available_liquidity
+    dup.4
+    dup.1
+    lte
+    assert
+    # Stack: [available_liquidity, borrowed_slot, total_borrowed, liquidity_slot, amount, asset_id]
+
+    # Update total borrowed
+    drop
+    # Stack: [borrowed_slot, total_borrowed, liquidity_slot, amount, asset_id]
+
+    dup.3
+    dup.2
+    add
+    # Stack: [new_total_borrowed, borrowed_slot, total_borrowed, liquidity_slot, amount, asset_id]
+
+    swap.1
+    exec.account::set_item
+    # Stack: [total_borrowed, liquidity_slot, amount, asset_id]
+
+    # Clean up
+    drop
+    drop
+    drop
+    # Stack: [asset_id]
+
+    # Update interest rates
+    exec.update_rates
+
+    # Success
+    push.1
+end
+
+# ===================================================================================================
+# REPAY FUNCTION
+# Records a repayment and updates pool state
+# Stack input: [amount, asset_id]
+# Stack output: [success_flag]
+# ===================================================================================================
+export.repay
+    # Stack: [amount, asset_id]
+
+    # Get the appropriate storage slot for total borrowed
+    dup.1
+    push.ASSET_USDC eq
+    if.true
+        push.TOTAL_BORROWED_USDC
+    else
+        dup.1
+        push.ASSET_DAI eq
+        if.true
+            push.TOTAL_BORROWED_DAI
+        else
+            push.TOTAL_BORROWED_WETH
+        end
+    end
+    # Stack: [borrowed_slot, amount, asset_id]
+
+    # Get current total borrowed
+    dup.0
+    exec.account::get_item
+    # Stack: [current_borrowed, borrowed_slot, amount, asset_id]
+
+    # Verify repayment amount doesn't exceed borrowed amount
+    dup.0
+    dup.3
+    gte
+    assert
+    # Stack: [current_borrowed, borrowed_slot, amount, asset_id]
+
+    # Calculate new total borrowed
+    dup.2
+    sub
+    # Stack: [new_borrowed, borrowed_slot, amount, asset_id]
+
+    # Store updated total borrowed
+    swap.1
+    exec.account::set_item
+    # Stack: [amount, asset_id]
+
+    # Clean up
+    drop
+    # Stack: [asset_id]
+
+    # Update interest rates
+    exec.update_rates
+
+    # Success
+    push.1
+end
+
+# ===================================================================================================
+# RECORD LIQUIDATION
+# Updates pool state after a liquidation event
+# Stack input: [debt_repaid, asset_id]
+# Stack output: [success_flag]
+# ===================================================================================================
+export.record_liquidation
+    # Stack: [debt_repaid, asset_id]
+
+    # Liquidation is similar to repayment - reduce total borrowed
+    # Call repay function
+    exec.repay
+    # Stack: [success_flag]
+end
+
+# ===================================================================================================
+# INITIALIZE RESERVE
+# Initializes a new reserve with default values
+# Stack input: [asset_id]
+# Stack output: [success_flag]
+# ===================================================================================================
+export.initialize_reserve
+    # Stack: [asset_id]
+
+    # Get storage slots for this asset
+    dup.0
+    push.ASSET_USDC eq
+    if.true
+        # Initialize USDC reserve
+        push.TOTAL_LIQUIDITY_USDC
+        push.0
+        exec.account::set_item
+
+        push.TOTAL_BORROWED_USDC
+        push.0
+        exec.account::set_item
+
+        push.LIQUIDITY_INDEX_USDC
+        push.10000  # Initial index = 1.0 (in basis points)
+        exec.account::set_item
+
+        push.BORROW_INDEX_USDC
+        push.10000
+        exec.account::set_item
+
+        push.CURRENT_LIQUIDITY_RATE_USDC
+        push.0
+        exec.account::set_item
+
+        push.CURRENT_BORROW_RATE_USDC
+        push.0
+        exec.account::set_item
+    else
+        dup.0
+        push.ASSET_DAI eq
+        if.true
+            # Initialize DAI reserve
+            push.TOTAL_LIQUIDITY_DAI
+            push.0
+            exec.account::set_item
+
+            push.TOTAL_BORROWED_DAI
+            push.0
+            exec.account::set_item
+
+            push.LIQUIDITY_INDEX_DAI
+            push.10000
+            exec.account::set_item
+
+            push.BORROW_INDEX_DAI
+            push.10000
+            exec.account::set_item
+
+            push.CURRENT_LIQUIDITY_RATE_DAI
+            push.0
+            exec.account::set_item
+
+            push.CURRENT_BORROW_RATE_DAI
+            push.0
+            exec.account::set_item
+        else
+            # Initialize WETH reserve
+            push.TOTAL_LIQUIDITY_WETH
+            push.0
+            exec.account::set_item
+
+            push.TOTAL_BORROWED_WETH
+            push.0
+            exec.account::set_item
+
+            push.LIQUIDITY_INDEX_WETH
+            push.10000
+            exec.account::set_item
+
+            push.BORROW_INDEX_WETH
+            push.10000
+            exec.account::set_item
+
+            push.CURRENT_LIQUIDITY_RATE_WETH
+            push.0
+            exec.account::set_item
+
+            push.CURRENT_BORROW_RATE_WETH
+            push.0
+            exec.account::set_item
+        end
+    end
+
+    drop
+    push.1
 end
