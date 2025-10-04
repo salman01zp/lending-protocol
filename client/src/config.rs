@@ -26,12 +26,34 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
-        // TODO: Load from file if exists, otherwise return default
-        Ok(Self::default())
+        let config_path = Self::get_config_path();
+
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)?;
+            let config: Config = serde_json::from_str(&content)?;
+            Ok(config)
+        } else {
+            Ok(Self::default())
+        }
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        // TODO: Save configuration to file
+        let config_path = Self::get_config_path();
+
+        // Ensure parent directory exists
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(&config_path, content)?;
         Ok(())
+    }
+
+    fn get_config_path() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".miden-lending")
+            .join("config.json")
     }
 }

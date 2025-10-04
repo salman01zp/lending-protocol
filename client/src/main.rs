@@ -144,96 +144,126 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    use config::Config;
+    use accounts::AccountManager;
+    use std::path::PathBuf;
+
+    // Load configuration
+    let mut config = Config::load()?;
+
     match cli.command {
         Commands::Init { rpc } => {
             info!("Initializing lending protocol with RPC: {}", rpc);
-            // TODO: Initialize client and store configuration
+            config.rpc_endpoint = rpc;
+
+            // Create storage directory
+            std::fs::create_dir_all(&config.storage_path)?;
+            config.save()?;
+
             println!("✅ Protocol initialized");
+            println!("   RPC: {}", config.rpc_endpoint);
+            println!("   Storage: {:?}", config.storage_path);
         }
 
         Commands::CreateAccount { storage_mode } => {
             info!("Creating user lending account ({})", storage_mode);
-            // TODO: Create user account using accounts module
-            println!("✅ User account created");
+
+            let mut account_manager = AccountManager::new(
+                &config.rpc_endpoint,
+                &config.storage_path
+            ).await?;
+
+            let result = account_manager.create_user_account(&storage_mode).await?;
+            println!("✅ {}", result);
         }
 
         Commands::DeployPool => {
             info!("Deploying lending pool account");
-            // TODO: Deploy lending pool account
-            println!("✅ Lending pool deployed");
+
+            let mut account_manager = AccountManager::new(
+                &config.rpc_endpoint,
+                &config.storage_path
+            ).await?;
+
+            let result = account_manager.deploy_lending_pool().await?;
+            println!("✅ {}", result);
         }
 
         Commands::DeployOracle => {
             info!("Deploying price oracle account");
-            // TODO: Deploy price oracle account
-            println!("✅ Price oracle deployed");
+
+            let mut account_manager = AccountManager::new(
+                &config.rpc_endpoint,
+                &config.storage_path
+            ).await?;
+
+            let result = account_manager.deploy_price_oracle().await?;
+            println!("✅ {}", result);
         }
 
         Commands::Deposit { asset_id, amount } => {
             info!("Depositing {} units of asset {}", amount, asset_id);
-            // TODO: Execute deposit transaction
-            println!("✅ Deposit successful");
+            println!("⚠️  Transaction execution requires full Miden client integration");
+            println!("   Asset: {}, Amount: {}", asset_id, amount);
+            println!("   This will be enabled after Miden API integration");
         }
 
         Commands::Withdraw { asset_id, amount } => {
             info!("Withdrawing {} units of asset {}", amount, asset_id);
-            // TODO: Execute withdrawal transaction
-            println!("✅ Withdrawal successful");
+            println!("⚠️  Transaction execution requires full Miden client integration");
+            println!("   Asset: {}, Amount: {}", asset_id, amount);
+            println!("   This will be enabled after Miden API integration");
         }
 
         Commands::SupplyCollateral { asset_id, amount } => {
             info!("Supplying {} units of asset {} as collateral", amount, asset_id);
-            // TODO: Execute supply collateral transaction
-            println!("✅ Collateral supplied");
+            println!("⚠️  Transaction execution requires full Miden client integration");
+            println!("   Asset: {}, Amount: {}", asset_id, amount);
+            println!("   This will be enabled after Miden API integration");
         }
 
         Commands::Borrow { asset_id, amount } => {
             info!("Borrowing {} units of asset {}", amount, asset_id);
-            // TODO: Execute borrow transaction
-            println!("✅ Borrow successful");
+            println!("⚠️  Transaction execution requires full Miden client integration");
+            println!("   Asset: {}, Amount: {}", asset_id, amount);
+            println!("   This will be enabled after Miden API integration");
         }
 
         Commands::Repay { asset_id, amount } => {
             info!("Repaying {} units of asset {}", amount, asset_id);
-            // TODO: Execute repayment transaction
-            println!("✅ Repayment successful");
+            println!("⚠️  Transaction execution requires full Miden client integration");
+            println!("   Asset: {}, Amount: {}", asset_id, amount);
+            println!("   This will be enabled after Miden API integration");
         }
 
         Commands::GetAccountInfo => {
             info!("Fetching account information");
-            // TODO: Query user account data
-            println!("Account Data:");
-            println!("  Collateral: USDC: 0, DAI: 0, WETH: 0");
-            println!("  Debt: USDC: 0, DAI: 0, WETH: 0");
-            println!("  Health Factor: N/A");
+            println!("⚠️  Account queries require full Miden client integration");
+            println!("   This will be enabled after Miden API integration");
         }
 
         Commands::GetReserveData { asset_id } => {
             info!("Fetching reserve data for asset {}", asset_id);
-            // TODO: Query lending pool reserve data
-            println!("Reserve Data for Asset {}:", asset_id);
-            println!("  Total Liquidity: 0");
-            println!("  Total Borrowed: 0");
-            println!("  Liquidity Rate: 0%");
-            println!("  Borrow Rate: 0%");
+            println!("⚠️  Reserve queries require full Miden client integration");
+            println!("   This will be enabled after Miden API integration");
         }
 
         Commands::GetPrice { asset_id } => {
             info!("Fetching price for asset {}", asset_id);
-            // TODO: Query price from oracle
-            println!("Asset {} Price: $0.00", asset_id);
+            println!("⚠️  Price queries require full Miden client integration");
+            println!("   This will be enabled after Miden API integration");
         }
 
         Commands::UpdatePrice { asset_id, price } => {
             info!("Updating price for asset {} to {}", asset_id, price);
-            // TODO: Execute price update transaction
-            println!("✅ Price updated");
+            println!("⚠️  Price updates require full Miden client integration");
+            println!("   This will be enabled after Miden API integration");
         }
 
         Commands::HealthFactor => {
             info!("Calculating health factor");
-            // TODO: Calculate and display health factor
-            println!("Health Factor: N/A (no debt)");
+            println!("⚠️  Health factor calculation requires full Miden client integration");
+            println!("   This will be enabled after Miden API integration");
         }
     }
 

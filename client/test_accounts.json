@@ -1,0 +1,26 @@
+{
+  "network": "local",
+  "created_at": "2025-10-04T09:20:14Z",
+  "accounts": {
+    "alice": {
+      "id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "storage_mode": "private",
+      "description": "Regular user for deposit/withdraw/borrow tests"
+    },
+    "bob": {
+      "id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "storage_mode": "private",
+      "description": "Second user for multi-user tests"
+    },
+    "charlie": {
+      "id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "storage_mode": "public",
+      "description": "Public account user for testing"
+    },
+    "liquidator": {
+      "id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "storage_mode": "public",
+      "description": "Liquidator account for liquidation tests"
+    }
+  }
+}
