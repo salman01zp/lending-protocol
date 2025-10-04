@@ -2,6 +2,7 @@
 name = "miden-lending-client"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.87"
 
 [lib]
 name = "miden_lending_client"
@@ -11,12 +12,21 @@ path = "src/lib.rs"
 name = "miden-lending-client"
 path = "src/main.rs"
 
-[dependencies]
-miden-client = { version = "0.11.4", default-features = false }
+[features]
+default = ["std"]
+std = ["miden-assembly/std", "miden-objects/std", "miden-stdlib/std", "miden-lib/std", "miden-tx/std", "hex/std"]
+testing = ["miden-objects/testing", "miden-tx/testing", "miden-lib/testing"]
+with-debug-info = ["miden-stdlib/with-debug-info"]
 
+[dependencies]
+# Miden core dependencies
 miden-lib = { version = "0.11.4", default-features = false }
 miden-objects = { version = "0.11.4", default-features = false }
+miden-stdlib = { version = "0.18", default-features = false }
 miden-tx = { version = "0.11.4", default-features = false }
+miden-assembly = { version = "0.18", default-features = false }
+
+# Utilities
 tokio = { version = "1.40", features = ["full"] }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -24,5 +34,28 @@ serde_json = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
-hex = "0.4"
+hex = { version = "0.4", default-features = false }
 dirs = "5.0"
+rand = "0.8"
+thiserror = "2.0"
+
+[dev-dependencies]
+miden-lib = { version = "0.11.4", default-features = false }
+miden-objects = { version = "0.11.4", features = ["testing"], default-features = false }
+miden-tx = { version = "0.11.4", features = ["testing"], default-features = false }
+miden-testing = { version = "0.11.4", features = ["std"] }
+vm-processor = { package = "miden-processor", version = "0.18.0", default-features = false }
+
+[build-dependencies]
+regex = { version = "1.10" }
+walkdir = { version = "2.5" }
+miden-assembly = { version = "0.18", default-features = false }
+miden-stdlib = { version = "0.18", default-features = false }
+miden-lib = { version = "0.11.4", default-features = false }
+miden-objects = { version = "0.11.4", default-features = false }
+
+[profile.test-release]
+inherits = "release"
+debug = true
+debug-assertions = true
+overflow-checks = true

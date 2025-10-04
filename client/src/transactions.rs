@@ -1,6 +1,6 @@
 // Transaction building and execution module
 
-use crate::miden_client::{LendingClient, AccountId, TransactionScriptBuilder, Asset, Note};
+use crate::miden_client::{LendingClient, AccountId, TransactionScriptBuilder};
 use anyhow::{Context, Result};
 use tracing::{info, debug};
 
@@ -182,7 +182,7 @@ impl TransactionBuilder {
     pub async fn liquidate(
         &mut self,
         liquidator_account_id: &AccountId,
-        borrower_account_id: &AccountId,
+        _borrower_account_id: &AccountId,
         collateral_asset_id: u64,
         debt_asset_id: u64,
         debt_to_cover: u64,
@@ -260,7 +260,7 @@ impl TransactionBuilder {
         debug!("Get reserve data script:\n{}", script);
 
         // Execute transaction (read-only)
-        let result = self.client
+        let _result = self.client
             .execute_transaction(&script, &self.pool_account_id)
             .await
             .context("Failed to query reserve data")?;
@@ -291,7 +291,7 @@ impl TransactionBuilder {
         debug!("Get price script:\n{}", script);
 
         // Execute transaction (read-only)
-        let result = self.client
+        let _result = self.client
             .execute_transaction(&script, &self.oracle_account_id)
             .await
             .context("Failed to query asset price")?;
@@ -313,7 +313,7 @@ impl TransactionBuilder {
         debug!("Health factor script:\n{}", script);
 
         // Execute transaction (read-only)
-        let result = self.client
+        let _result = self.client
             .execute_transaction(&script, user_account_id)
             .await
             .context("Failed to calculate health factor")?;
