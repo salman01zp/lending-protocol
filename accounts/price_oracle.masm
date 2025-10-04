@@ -1,0 +1,229 @@
+# ===================================================================================================
+# PriceOracle Account - Asset price management
+# ===================================================================================================
+# This account stores and manages asset prices for the lending protocol.
+# Prices are stored in USD with 8 decimals precision (like Chainlink).
+
+use.miden::account
+use.std::sys
+
+# Storage slots for asset prices (in USD with 8 decimals)
+const.PRICE_USDC=0
+const.PRICE_DAI=1
+const.PRICE_WETH=2
+const.PRICE_WBTC=3
+
+# Storage slots for price timestamps
+const.TIMESTAMP_USDC=4
+const.TIMESTAMP_DAI=5
+const.TIMESTAMP_WETH=6
+const.TIMESTAMP_WBTC=7
+
+# Asset IDs
+const.ASSET_USDC=1
+const.ASSET_DAI=2
+const.ASSET_WETH=3
+const.ASSET_WBTC=4
+
+# Price staleness threshold (in seconds)
+const.MAX_PRICE_AGE=3600  # 1 hour
+
+# Price precision
+const.PRICE_DECIMALS=100000000  # 8 decimals (e.g., $1.00 = 100000000)
+
+# ===================================================================================================
+# GET ASSET PRICE
+# Returns the current price of an asset
+# Stack input: [asset_id]
+# Stack output: [price]
+# ===================================================================================================
+export.get_asset_price
+    # Stack: [asset_id]
+
+    # Determine which price slot to read
+    dup.0
+    push.ASSET_USDC
+    eq
+    if.true
+        push.PRICE_USDC
+    else
+        dup.0
+        push.ASSET_DAI
+        eq
+        if.true
+            push.PRICE_DAI
+        else
+            dup.0
+            push.ASSET_WETH
+            eq
+            if.true
+                push.PRICE_WETH
+            else
+                push.PRICE_WBTC
+            end
+        end
+    end
+    # Stack: [price_slot, asset_id]
+
+    # Get the price from storage
+    exec.account::get_item
+    # Stack: [price, asset_id]
+
+    # Clean up stack
+    swap.1
+    drop
+    # Stack: [price]
+end
+
+# ===================================================================================================
+# UPDATE ASSET PRICE
+# Updates the price of an asset (only callable by authorized oracle updater)
+# Stack input: [price, asset_id]
+# Stack output: [success]
+# ===================================================================================================
+export.update_asset_price
+    # Stack: [price, asset_id]
+
+    # TODO: Add authentication check to verify caller is authorized oracle updater
+
+    # Determine which price slot to update
+    dup.1
+    push.ASSET_USDC
+    eq
+    if.true
+        push.PRICE_USDC
+        push.TIMESTAMP_USDC
+    else
+        dup.1
+        push.ASSET_DAI
+        eq
+        if.true
+            push.PRICE_DAI
+            push.TIMESTAMP_DAI
+        else
+            dup.1
+            push.ASSET_WETH
+            eq
+            if.true
+                push.PRICE_WETH
+                push.TIMESTAMP_WETH
+            else
+                push.PRICE_WBTC
+                push.TIMESTAMP_WBTC
+            end
+        end
+    end
+    # Stack: [timestamp_slot, price_slot, price, asset_id]
+
+    # Store the new price
+    swap.1
+    dup.0
+    # Stack: [price_slot, price_slot, timestamp_slot, price, asset_id]
+
+    dup.3
+    swap.1
+    # Stack: [price_slot, price, price_slot, timestamp_slot, price, asset_id]
+
+    exec.account::set_item
+    # Stack: [price_slot, timestamp_slot, price, asset_id]
+
+    # Update timestamp with current time
+    drop
+    # Stack: [timestamp_slot, price, asset_id]
+
+    # Get current timestamp (simplified - in production would use actual timestamp)
+    push.1234567890  # Placeholder for current timestamp
+    swap.1
+    # Stack: [timestamp_slot, current_time, price, asset_id]
+
+    exec.account::set_item
+    # Stack: [price, asset_id]
+
+    # Clean up
+    drop
+    drop
+
+    # Return success
+    push.1
+end
+
+# ===================================================================================================
+# GET MULTIPLE PRICES
+# Returns prices for multiple assets
+# Stack input: [asset_id_1, asset_id_2, asset_id_3]
+# Stack output: [price_1, price_2, price_3]
+# ===================================================================================================
+export.get_multiple_prices
+    # Stack: [asset_id_1, asset_id_2, asset_id_3]
+
+    # Get price for asset 1
+    dup.2
+    exec.get_asset_price
+    # Stack: [price_1, asset_id_1, asset_id_2, asset_id_3]
+
+    # Get price for asset 2
+    dup.2
+    exec.get_asset_price
+    # Stack: [price_2, price_1, asset_id_1, asset_id_2, asset_id_3]
+
+    # Get price for asset 3
+    dup.2
+    exec.get_asset_price
+    # Stack: [price_3, price_2, price_1, asset_id_1, asset_id_2, asset_id_3]
+
+    # Reorder stack to clean up asset IDs
+    swap.5
+    drop
+    swap.3
+    drop
+    swap.1
+    drop
+    # Stack: [price_1, price_2, price_3]
+end
+
+# ===================================================================================================
+# INITIALIZE PRICES
+# Sets initial prices for all assets (called once during setup)
+# Stack input: [price_usdc, price_dai, price_weth, price_wbtc]
+# Stack output: [success]
+# ===================================================================================================
+export.initialize_prices
+    # Stack: [price_usdc, price_dai, price_weth, price_wbtc]
+
+    # Store USDC price ($1.00 = 100000000)
+    push.PRICE_USDC
+    dup.4
+    swap.1
+    exec.account::set_item
+    # Stack: [price_usdc, price_dai, price_weth, price_wbtc]
+
+    # Store DAI price ($1.00 = 100000000)
+    push.PRICE_DAI
+    dup.3
+    swap.1
+    exec.account::set_item
+    # Stack: [price_usdc, price_dai, price_weth, price_wbtc]
+
+    # Store WETH price (e.g., $2500.00 = 250000000000)
+    push.PRICE_WETH
+    dup.2
+    swap.1
+    exec.account::set_item
+    # Stack: [price_usdc, price_dai, price_weth, price_wbtc]
+
+    # Store WBTC price (e.g., $45000.00 = 4500000000000)
+    push.PRICE_WBTC
+    dup.1
+    swap.1
+    exec.account::set_item
+    # Stack: [price_usdc, price_dai, price_weth, price_wbtc]
+
+    # Clean up
+    drop
+    drop
+    drop
+    drop
+
+    # Return success
+    push.1
+end

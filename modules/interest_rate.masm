@@ -1,0 +1,196 @@
+# ===================================================================================================
+# InterestRateStrategy Module - Two-slope interest rate model
+# ===================================================================================================
+# Calculates supply and borrow interest rates based on utilization using a two-slope model.
+# This is similar to Aave's interest rate strategy.
+
+use.std::math
+
+# Interest rate parameters (in basis points, 10000 = 100%)
+const.OPTIMAL_UTILIZATION_USDC=9000      # 90% for stablecoins
+const.BASE_VARIABLE_BORROW_RATE=0       # 0%
+const.VARIABLE_RATE_SLOPE1=400          # 4%
+const.VARIABLE_RATE_SLOPE2=6000         # 60%
+const.MAX_RATE=10000                     # 100%
+
+# Fixed point precision
+const.PRECISION=10000                    # For basis points calculation
+
+# ===================================================================================================
+# CALCULATE INTEREST RATES
+# Implements two-slope interest rate model based on utilization
+# Stack input: [total_borrowed, total_liquidity, reserve_factor]
+# Stack output: [supply_rate, borrow_rate]
+# ===================================================================================================
+export.calculate_interest_rates
+    # Stack: [total_borrowed, total_liquidity, reserve_factor]
+
+    # Calculate utilization rate: U = total_borrowed / total_liquidity
+    # Handle edge case where total_liquidity = 0
+    dup.1
+    push.0
+    eq
+    if.true
+        # If no liquidity, utilization = 0
+        drop
+        drop
+        drop
+        push.0  # borrow_rate
+        push.0  # supply_rate
+    else
+        # Calculate utilization = (total_borrowed * PRECISION) / total_liquidity
+        dup.1
+        dup.1
+        # Stack: [total_liquidity, total_borrowed, total_borrowed, total_liquidity, reserve_factor]
+
+        push.PRECISION
+        mul
+        # Stack: [total_borrowed * PRECISION, total_liquidity, total_borrowed, total_liquidity, reserve_factor]
+
+        div
+        # Stack: [utilization, total_borrowed, total_liquidity, reserve_factor]
+
+        # Calculate borrow rate based on utilization
+        exec.calculate_borrow_rate
+        # Stack: [borrow_rate, total_borrowed, total_liquidity, reserve_factor]
+
+        # Calculate supply rate: supply_rate = utilization * borrow_rate * (1 - reserve_factor)
+        # First calculate utilization again
+        dup.2
+        push.PRECISION
+        mul
+        dup.2
+        div
+        # Stack: [utilization, borrow_rate, total_borrowed, total_liquidity, reserve_factor]
+
+        # Multiply by borrow_rate
+        dup.1
+        mul
+        push.PRECISION
+        div
+        # Stack: [utilization * borrow_rate, borrow_rate, total_borrowed, total_liquidity, reserve_factor]
+
+        # Multiply by (1 - reserve_factor)
+        # (1 - reserve_factor) = (PRECISION - reserve_factor)
+        push.PRECISION
+        dup.5
+        sub
+        # Stack: [(PRECISION - reserve_factor), utilization * borrow_rate, borrow_rate, total_borrowed, total_liquidity, reserve_factor]
+
+        mul
+        push.PRECISION
+        div
+        # Stack: [supply_rate, borrow_rate, total_borrowed, total_liquidity, reserve_factor]
+
+        # Clean up stack - keep only supply_rate and borrow_rate
+        swap.4
+        drop
+        swap.2
+        drop
+        drop
+        # Stack: [supply_rate, borrow_rate]
+    end
+end
+
+# ===================================================================================================
+# CALCULATE BORROW RATE
+# Internal procedure to calculate variable borrow rate based on utilization
+# Stack input: [utilization]
+# Stack output: [borrow_rate]
+# ===================================================================================================
+proc.calculate_borrow_rate
+    # Stack: [utilization]
+
+    # Check if utilization < OPTIMAL_UTILIZATION
+    dup.0
+    push.OPTIMAL_UTILIZATION_USDC
+    lt
+    # Stack: [is_below_optimal, utilization]
+
+    if.true
+        # Slope 1: rate = BASE_RATE + (utilization / optimal) * SLOPE1
+        # rate = 0 + (U / 9000) * 400
+
+        dup.0
+        push.VARIABLE_RATE_SLOPE1
+        mul
+        # Stack: [U * SLOPE1, utilization]
+
+        push.OPTIMAL_UTILIZATION_USDC
+        div
+        # Stack: [rate, utilization]
+
+        push.BASE_VARIABLE_BORROW_RATE
+        add
+        # Stack: [borrow_rate, utilization]
+
+        swap.1
+        drop
+        # Stack: [borrow_rate]
+    else
+        # Slope 2: rate = BASE_RATE + SLOPE1 + ((U - optimal) / (1 - optimal)) * SLOPE2
+        # rate = 0 + 400 + ((U - 9000) / (10000 - 9000)) * 6000
+
+        # Calculate excess utilization: U - optimal
+        dup.0
+        push.OPTIMAL_UTILIZATION_USDC
+        sub
+        # Stack: [excess_utilization, utilization]
+
+        # Calculate excess multiplier: (1 - optimal) = (PRECISION - OPTIMAL)
+        push.PRECISION
+        push.OPTIMAL_UTILIZATION_USDC
+        sub
+        # Stack: [(PRECISION - optimal), excess_utilization, utilization]
+
+        # Calculate slope 2 rate: (excess_utilization / (PRECISION - optimal)) * SLOPE2
+        swap.1
+        # Stack: [excess_utilization, (PRECISION - optimal), utilization]
+
+        push.VARIABLE_RATE_SLOPE2
+        mul
+        # Stack: [excess * SLOPE2, (PRECISION - optimal), utilization]
+
+        swap.1
+        div
+        # Stack: [slope2_rate, utilization]
+
+        # Add base rate + slope1
+        push.BASE_VARIABLE_BORROW_RATE
+        push.VARIABLE_RATE_SLOPE1
+        add
+        add
+        # Stack: [borrow_rate, utilization]
+
+        swap.1
+        drop
+        # Stack: [borrow_rate]
+    end
+end
+
+# ===================================================================================================
+# GET UTILIZATION RATE
+# Helper function to calculate utilization rate
+# Stack input: [total_borrowed, total_liquidity]
+# Stack output: [utilization_rate]
+# ===================================================================================================
+export.get_utilization_rate
+    # Stack: [total_borrowed, total_liquidity]
+
+    # Handle zero liquidity case
+    dup.1
+    push.0
+    eq
+    if.true
+        drop
+        drop
+        push.0
+    else
+        # utilization = (total_borrowed * PRECISION) / total_liquidity
+        push.PRECISION
+        mul
+        swap.1
+        div
+    end
+    # Stack: [utilization_rate]
+end

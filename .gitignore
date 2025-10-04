@@ -1,0 +1,38 @@
+# Rust
+/client/target/
+/client/**/*.rs.bk
+/client/Cargo.lock
+
+# Miden
+*.miden
+*.proof
+*.stark
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Build artifacts
+/build/
+/dist/
+
+# Node modules (if any JS tools are used)
+node_modules/
+
+# Test artifacts
+/test_data/
+*.test.json

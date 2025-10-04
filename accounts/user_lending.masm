@@ -1,0 +1,329 @@
+# ===================================================================================================
+# User Lending Account - User's personal lending account
+# ===================================================================================================
+# This account template allows users to manage their collateral, track debts, and interact
+# with the lending pool. All assets are stored locally in the user's account.
+
+use.miden::account
+use.miden::note
+use.std::sys
+
+# Storage slot constants for user's collateral
+const.COLLATERAL_USDC=0
+const.COLLATERAL_DAI=1
+const.COLLATERAL_WETH=2
+
+# Storage slot constants for user's debt
+const.DEBT_USDC=3
+const.DEBT_DAI=4
+const.DEBT_WETH=5
+
+# Health factor and liquidation parameters
+const.HEALTH_FACTOR=6
+const.LIQUIDATION_THRESHOLD=8500  # 85% in basis points
+
+# Asset IDs
+const.ASSET_USDC=1
+const.ASSET_DAI=2
+const.ASSET_WETH=3
+
+# Precision
+const.PRECISION=10000
+
+# ===================================================================================================
+# SUPPLY COLLATERAL
+# Stores collateral in user's account storage
+# Stack input: [amount, asset_id]
+# Stack output: [success]
+# ===================================================================================================
+export.supply_collateral
+    # Stack: [amount, asset_id]
+
+    # Determine which storage slot to use based on asset_id
+    dup.1
+    push.ASSET_USDC
+    eq
+    if.true
+        push.COLLATERAL_USDC
+    else
+        dup.1
+        push.ASSET_DAI
+        eq
+        if.true
+            push.COLLATERAL_DAI
+        else
+            push.COLLATERAL_WETH
+        end
+    end
+    # Stack: [collateral_slot, amount, asset_id]
+
+    # Get current collateral amount
+    dup.0
+    exec.account::get_item
+    # Stack: [current_collateral, collateral_slot, amount, asset_id]
+
+    # Add new amount
+    dup.2
+    add
+    # Stack: [new_collateral, collateral_slot, amount, asset_id]
+
+    # Store updated collateral
+    swap.1
+    exec.account::set_item
+    # Stack: [amount, asset_id]
+
+    # Clean up stack
+    drop
+    drop
+
+    # Return success
+    push.1
+    # Stack: [1]
+end
+
+# ===================================================================================================
+# WITHDRAW COLLATERAL
+# Withdraws collateral if it doesn't violate health factor
+# Stack input: [amount, asset_id]
+# Stack output: [success]
+# ===================================================================================================
+export.withdraw_collateral
+    # Stack: [amount, asset_id]
+
+    # Get collateral slot
+    dup.1
+    push.ASSET_USDC
+    eq
+    if.true
+        push.COLLATERAL_USDC
+    else
+        dup.1
+        push.ASSET_DAI
+        eq
+        if.true
+            push.COLLATERAL_DAI
+        else
+            push.COLLATERAL_WETH
+        end
+    end
+    # Stack: [collateral_slot, amount, asset_id]
+
+    # Get current collateral
+    dup.0
+    exec.account::get_item
+    # Stack: [current_collateral, collateral_slot, amount, asset_id]
+
+    # Verify sufficient collateral
+    dup.0
+    dup.3
+    gte
+    assert
+    # Stack: [current_collateral, collateral_slot, amount, asset_id]
+
+    # Subtract withdrawal amount
+    dup.2
+    sub
+    # Stack: [new_collateral, collateral_slot, amount, asset_id]
+
+    # Store updated collateral
+    swap.1
+    exec.account::set_item
+    # Stack: [amount, asset_id]
+
+    # TODO: Verify health factor is still > 1.0 after withdrawal
+
+    # Clean up
+    drop
+    drop
+
+    # Success
+    push.1
+end
+
+# ===================================================================================================
+# RECORD BORROW
+# Records borrowed amount in user's debt tracking
+# Stack input: [amount, asset_id]
+# Stack output: [success]
+# ===================================================================================================
+export.record_borrow
+    # Stack: [amount, asset_id]
+
+    # Get debt slot
+    dup.1
+    push.ASSET_USDC
+    eq
+    if.true
+        push.DEBT_USDC
+    else
+        dup.1
+        push.ASSET_DAI
+        eq
+        if.true
+            push.DEBT_DAI
+        else
+            push.DEBT_WETH
+        end
+    end
+    # Stack: [debt_slot, amount, asset_id]
+
+    # Get current debt
+    dup.0
+    exec.account::get_item
+    # Stack: [current_debt, debt_slot, amount, asset_id]
+
+    # Add new borrow amount
+    dup.2
+    add
+    # Stack: [new_debt, debt_slot, amount, asset_id]
+
+    # Store updated debt
+    swap.1
+    exec.account::set_item
+    # Stack: [amount, asset_id]
+
+    # Clean up
+    drop
+    drop
+
+    push.1
+end
+
+# ===================================================================================================
+# RECORD REPAYMENT
+# Records debt repayment in user's account
+# Stack input: [amount, asset_id]
+# Stack output: [success]
+# ===================================================================================================
+export.record_repayment
+    # Stack: [amount, asset_id]
+
+    # Get debt slot
+    dup.1
+    push.ASSET_USDC
+    eq
+    if.true
+        push.DEBT_USDC
+    else
+        dup.1
+        push.ASSET_DAI
+        eq
+        if.true
+            push.DEBT_DAI
+        else
+            push.DEBT_WETH
+        end
+    end
+    # Stack: [debt_slot, amount, asset_id]
+
+    # Get current debt
+    dup.0
+    exec.account::get_item
+    # Stack: [current_debt, debt_slot, amount, asset_id]
+
+    # Verify repayment amount doesn't exceed debt
+    dup.0
+    dup.3
+    gte
+    assert
+    # Stack: [current_debt, debt_slot, amount, asset_id]
+
+    # Subtract repayment
+    dup.2
+    sub
+    # Stack: [new_debt, debt_slot, amount, asset_id]
+
+    # Store updated debt
+    swap.1
+    exec.account::set_item
+    # Stack: [amount, asset_id]
+
+    # Clean up
+    drop
+    drop
+
+    push.1
+end
+
+# ===================================================================================================
+# GET ACCOUNT DATA
+# Returns user's account data (collateral and debt)
+# Stack input: []
+# Stack output: [total_collateral_usdc, total_collateral_dai, total_collateral_weth,
+#                total_debt_usdc, total_debt_dai, total_debt_weth]
+# ===================================================================================================
+export.get_account_data
+    # Get all collateral amounts
+    push.COLLATERAL_USDC
+    exec.account::get_item
+
+    push.COLLATERAL_DAI
+    exec.account::get_item
+
+    push.COLLATERAL_WETH
+    exec.account::get_item
+
+    # Get all debt amounts
+    push.DEBT_USDC
+    exec.account::get_item
+
+    push.DEBT_DAI
+    exec.account::get_item
+
+    push.DEBT_WETH
+    exec.account::get_item
+
+    # Stack: [debt_weth, debt_dai, debt_usdc, collat_weth, collat_dai, collat_usdc]
+end
+
+# ===================================================================================================
+# CALCULATE HEALTH FACTOR
+# Calculates user's health factor based on collateral and debt
+# Health Factor = (total_collateral * liquidation_threshold) / total_debt
+# Stack input: [total_collateral_value, total_debt_value]
+# Stack output: [health_factor]
+# ===================================================================================================
+export.calculate_health_factor
+    # Stack: [total_collateral_value, total_debt_value]
+
+    # Handle edge case: no debt means infinite health factor (return max value)
+    dup.1
+    push.0
+    eq
+    if.true
+        drop
+        drop
+        push.1000000  # Return very large number to represent infinite health
+    else
+        # health_factor = (collateral * liquidation_threshold) / debt
+        # First multiply collateral by liquidation threshold
+        push.LIQUIDATION_THRESHOLD
+        mul
+        # Stack: [collateral * threshold, total_debt_value]
+
+        # Divide by precision to normalize
+        push.PRECISION
+        div
+        # Stack: [adjusted_collateral, total_debt_value]
+
+        # Divide by total debt to get health factor
+        swap.1
+        div
+        # Stack: [health_factor]
+    end
+end
+
+# ===================================================================================================
+# CHECK HEALTH FACTOR
+# Verifies that health factor is above 1.0 (safe from liquidation)
+# Stack input: [health_factor]
+# Stack output: [is_healthy]
+# ===================================================================================================
+export.check_health_factor
+    # Stack: [health_factor]
+
+    # Health factor must be >= PRECISION (which represents 1.0)
+    push.PRECISION
+    gte
+    # Stack: [is_healthy]
+end
